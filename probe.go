@@ -1,13 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/ipv4"
 	"gopkg.in/guregu/null.v4"
-	"io/ioutil"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -26,6 +25,26 @@ type ProbeResponse struct {
 	TTL          int         `json:"ttl"`
 	HeaderSource net.IP      `json:"-"`
 	HeaderDest   net.IP      `json:"-"`
+}
+
+func updateDNSName(hop *ProbeResponse, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	if !hop.IP.IsZero() {
+		// This should return multiple DNS names but we are only
+		// expecting 1 in the data model on the server side.
+		// TODO: support multiple reverse lookup records?
+		names, lookupErr := net.LookupAddr(hop.IP.ValueOrZero())
+		if lookupErr != nil {
+			log.Info("Reverse lookup failed for ", hop.IP)
+		}
+
+		log.Debug("Reverse lookup results: ", names)
+		if len(names) > 0 {
+			log.Debug(null.StringFrom(names[0]))
+			hop.DNSName = null.StringFrom(names[0])
+		}
+	}
 }
 
 func probeHandler(target ProbeTarget) {
@@ -97,7 +116,16 @@ func probeHandler(target ProbeTarget) {
 		}
 	}
 	probe.EndTime = time.Now()
-	output, _ := json.Marshal(probe)
-	_ = ioutil.WriteFile("outputs/"+target.Destination+".json", output, 0644)
+
+	var wg sync.WaitGroup
+	wg.Add(len(probe.Hops))
+
+	// range will make a copy of each element and pass by value, but we want the pointer
+	// so we will do this the old school way.
+	for i := 0; i < len(probe.Hops); i++ {
+		go updateDNSName(&probe.Hops[i], &wg)
+	}
+	wg.Wait()
+
 	go emitProbeResults(probe)
 }
