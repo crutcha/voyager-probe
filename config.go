@@ -46,12 +46,12 @@ func (c *VoyagerConfig) updateTargets() {
 	}
 
 	// destination is guarenteed to be unique
+	c.lock.Lock()
 	newTargetHash := make(map[string]ProbeTarget)
 	for _, target := range targetDefinitions {
 		newTargetHash[target.Destination] = target
 	}
 
-	c.lock.Lock()
 	c.targets = newTargetHash
 	c.lock.Unlock()
 

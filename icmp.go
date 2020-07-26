@@ -12,6 +12,8 @@ import (
 
 const PROBE_LOOKUP_TIMEOUT = 2
 
+// TODO: cleanup on some interval or will potentially grow unchecked if we receive ICMP
+// traffic not meant for us on our socket?
 var received = ResponseMap{responses: map[string][]ICMPResponse{}}
 
 type ResponseMap struct {
@@ -28,10 +30,6 @@ type ICMPResponse struct {
 
 func startICMPListener() {
 	log.Info("Starting ICMP listener thread")
-
-	// TODO: some other data structure that doesn't involve looping every single lookup
-	// receivedICMPResponses := make([]*icmp.Message, 0)
-	//receivedICMPResponses := make(map[string][]ICMPResponse)
 
 	recvBuffer := make([]byte, 1514)
 
@@ -105,7 +103,6 @@ func lookupResponses(dst string) ([]ICMPResponse, error) {
 			break
 		}
 
-		// TODO: LOCK THIS?!
 		received.lock.Lock()
 		values, ok := received.responses[dst]
 		if ok {
@@ -117,4 +114,27 @@ func lookupResponses(dst string) ([]ICMPResponse, error) {
 		received.lock.Unlock()
 	}
 	return lookupValues, err
+}
+
+func cleanupICMPResponses(responsemap *ResponseMap) {
+	for {
+		time.Sleep(1 * time.Minute)
+		responsemap.lock.Lock()
+
+		// range will give us a copy of the value not a reference
+		for key, _ := range responsemap.responses {
+			value := responsemap.responses[key]
+			for i := 0; i < len(value); i++ {
+				timeSince := time.Now().Sub(value[i].Timestamp)
+				if timeSince.Seconds() >= 60 {
+					value := append(value[:i], value[i+1:]...)
+					responsemap.responses[key] = value
+				}
+			}
+			if len(responsemap.responses[key]) == 0 {
+				delete(responsemap.responses, key)
+			}
+		}
+		responsemap.lock.Unlock()
+	}
 }

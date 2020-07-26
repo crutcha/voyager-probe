@@ -15,11 +15,10 @@ import (
 const pageSize int = 100
 
 type DRFResponse struct {
-	Count    uint   `json:"count"`
-	Next     string `json:"next"`
-	Previous string `json:"previous"`
-	//Results  []map[string][]ProbeTarget `json:"results"`
-	Results []ProbeTarget `json:"results"`
+	Count    uint          `json:"count"`
+	Next     string        `json:"next"`
+	Previous string        `json:"previous"`
+	Results  []ProbeTarget `json:"results"`
 }
 
 type ProbeTarget struct {
@@ -87,8 +86,6 @@ func emitProbeResults(probe Probe) {
 	req, _ := http.NewRequest("POST", fmt.Sprintf("https://%s/api/v1/probes/probe-results/", voyagerServer), bytes.NewBuffer(payload))
 	req.Header.Add("Authorization", fmt.Sprintf("Token %s", proberToken))
 	req.Header.Add("Content-Type", "application/json")
-	//req.Body = ioutil.NopCloser(bytes.NewBuffer(payload))
-	log.Debug(fmt.Sprintf("%+v", req))
 
 	resp, requestErr := client.Do(req)
 	if requestErr != nil {

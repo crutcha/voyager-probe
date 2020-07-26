@@ -19,7 +19,7 @@ const (
 var proberToken string
 var voyagerServer string
 
-func init() {
+func main() {
 	proberToken = os.Getenv("VOYAGER_PROBE_TOKEN")
 	voyagerServer = os.Getenv("VOYAGER_SERVER")
 
@@ -44,9 +44,7 @@ func init() {
 	if *debugLog == true {
 		log.SetLevel(log.DebugLevel)
 	}
-}
 
-func main() {
 	log.Info("Starting...")
 
 	startICMPListener()
@@ -75,10 +73,13 @@ func main() {
 					currentTickTime := config.targets[destination].Interval
 
 					// initial probe. pass by value should be fine here
+					config.lock.Lock()
 					go probeHandler(config.targets[destination])
+					config.lock.Unlock()
 					for {
 						select {
 						case <-ticker.C:
+							config.lock.Lock()
 							go probeHandler(config.targets[destination])
 							if config.targets[destination].Interval != currentTickTime {
 								log.Info(fmt.Sprintf(
@@ -89,6 +90,7 @@ func main() {
 								ticker.Stop()
 								ticker = time.NewTicker(time.Duration(config.targets[destination].Interval) * time.Second)
 							}
+							config.lock.Unlock()
 						case <-done:
 							log.Debug("Received halt request on done channel. Stopping ", destination)
 							return
@@ -99,18 +101,4 @@ func main() {
 		}
 		time.Sleep(REFRESH_INTERVAL * time.Minute)
 	}
-
-	//startICMPListener()
-	/*
-		var wg sync.WaitGroup
-		//targets := []string{"8.8.8.8", "1.1.1.1", "squareup.com", "order.dominos.com"}
-		//targets := []string{"1.1.1.1", "8.8.8.8"}
-
-			for _, target := range targets {
-				wg.Add(1)
-				go probeHandler(target, &wg)
-			}
-			wg.Wait()
-	*/
-	time.Sleep(19 * time.Minute)
 }
