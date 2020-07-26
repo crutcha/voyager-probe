@@ -29,7 +29,7 @@ type ProbeTarget struct {
 
 func getProbeTargets() ([]ProbeTarget, error) {
 	client := &http.Client{Timeout: time.Second * 10}
-	req, _ := http.NewRequest("GET", fmt.Sprintf("%s/api/v1/probes/probe-targets/", voyagerServer), nil)
+	req, _ := http.NewRequest("GET", fmt.Sprintf("https://%s/api/v1/probes/probe-targets/", voyagerServer), nil)
 	req.Header.Add("Authorization", fmt.Sprintf("Token %s", proberToken))
 
 	q := url.Values{}

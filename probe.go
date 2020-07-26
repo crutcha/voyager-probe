@@ -7,7 +7,6 @@ import (
 	"golang.org/x/net/ipv4"
 	"io/ioutil"
 	"net"
-	"sync"
 	"time"
 )
 
@@ -26,7 +25,7 @@ type ProbeResponse struct {
 	HeaderDest   net.IP `json:"header_dest"`
 }
 
-func probeHandler(dst string, wg *sync.WaitGroup) {
+func probeHandler(dst string) {
 	log.Info("Starting probes to ", dst)
 	probe := Probe{
 		Dest:      dst,
@@ -97,5 +96,4 @@ func probeHandler(dst string, wg *sync.WaitGroup) {
 	probe.EndTime = time.Now()
 	output, _ := json.Marshal(probe)
 	_ = ioutil.WriteFile("outputs/"+dst+".json", output, 0644)
-	wg.Done()
 }

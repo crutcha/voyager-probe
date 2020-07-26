@@ -1,10 +1,10 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"os"
-	//"sync"
-	"fmt"
 	"time"
 )
 
@@ -30,9 +30,9 @@ func init() {
 	if voyagerServer == "" {
 		log.Fatal("VOYAGER_SERVER env var required but not set")
 	}
-}
 
-func main() {
+	debugLog := flag.Bool("d", false, "debug")
+	flag.Parse()
 	customFormatter := new(log.TextFormatter)
 
 	// Yea, this is real stupid. For some reason this wants a reference timestamp?
@@ -40,9 +40,16 @@ func main() {
 	customFormatter.FullTimestamp = true
 
 	log.SetFormatter(customFormatter)
-	log.SetLevel(log.DebugLevel)
+
+	if *debugLog == true {
+		log.SetLevel(log.DebugLevel)
+	}
+}
+
+func main() {
 	log.Info("Starting...")
 
+	startICMPListener()
 	config := NewConfig()
 	currentProbers := make(map[string]chan int)
 	for {
@@ -66,10 +73,14 @@ func main() {
 				go func(destination string, done chan int) {
 					ticker := time.NewTicker(time.Duration(config.targets[destination].Interval) * time.Second)
 					currentTickTime := config.targets[destination].Interval
+
+					// initial probe
+					go probeHandler(destination)
 					for {
 						select {
 						case <-ticker.C:
-							log.Info("Ticked for: ", destination)
+							go probeHandler(destination)
+							log.Info("sent")
 							if config.targets[destination].Interval != currentTickTime {
 								log.Info(fmt.Sprintf(
 									"Interval update received. Changing interval for %s from %d  to %d seconds\n", destination,
