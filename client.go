@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
@@ -74,4 +75,30 @@ func getProbeTargets() ([]ProbeTarget, error) {
 	}
 
 	return targetArray, nil
+}
+
+func emitProbeResults(probe Probe) {
+	payload, jsonErr := json.Marshal(probe)
+	if jsonErr != nil {
+		log.Warn("Error creating probe result payload: ", jsonErr)
+	}
+
+	client := &http.Client{Timeout: time.Second * 10}
+	req, _ := http.NewRequest("POST", fmt.Sprintf("https://%s/api/v1/probes/probe-results/", voyagerServer), bytes.NewBuffer(payload))
+	req.Header.Add("Authorization", fmt.Sprintf("Token %s", proberToken))
+	req.Header.Add("Content-Type", "application/json")
+	//req.Body = ioutil.NopCloser(bytes.NewBuffer(payload))
+	log.Debug(fmt.Sprintf("%+v", req))
+
+	resp, requestErr := client.Do(req)
+	if requestErr != nil {
+		log.Warn(requestErr)
+		return
+	}
+
+	if resp.StatusCode != 201 {
+		respBody, _ := ioutil.ReadAll(resp.Body)
+		log.Warn(fmt.Sprintf("POST of probe results failed: [HTTP%d] %s\n", resp.StatusCode, string(respBody)))
+	}
+
 }

@@ -5,32 +5,35 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/ipv4"
+	"gopkg.in/guregu/null.v4"
 	"io/ioutil"
 	"net"
 	"time"
 )
 
 type Probe struct {
-	Dest      string          `json:"dest"`
+	Target    string          `json:"target"`
 	StartTime time.Time       `json:"start_time"`
 	EndTime   time.Time       `json:"end_time"`
-	Responses []ProbeResponse `json:"responses"`
+	Hops      []ProbeResponse `json:"hops"`
 }
 
 type ProbeResponse struct {
-	ProbeSource  string `json:"probe_source"`
-	Time         int64  `json:"response_time"`
-	TTL          int    `json:"ttl"`
-	HeaderSource net.IP `json:"header_source"`
-	HeaderDest   net.IP `json:"header_dest"`
+	IP           null.String `json:"ip"`
+	DNSName      null.String `json:"dns_name"`
+	Time         int64       `json:"response_time"`
+	Responded    bool        `json:"responded"`
+	TTL          int         `json:"ttl"`
+	HeaderSource net.IP      `json:"-"`
+	HeaderDest   net.IP      `json:"-"`
 }
 
-func probeHandler(dst string) {
-	log.Info("Starting probes to ", dst)
+func probeHandler(target ProbeTarget) {
+	log.Info("Starting probes to ", target.Destination)
 	probe := Probe{
-		Dest:      dst,
+		Target:    target.Destination,
 		StartTime: time.Now(),
-		Responses: make([]ProbeResponse, 0),
+		Hops:      make([]ProbeResponse, 0),
 	}
 
 	sequence := 0
@@ -39,7 +42,7 @@ func probeHandler(dst string) {
 	reachedDest := false
 	for !reachedDest {
 		for i := 0; i < PROBE_COUNT; i++ {
-			dst := fmt.Sprintf("%s:%d", probe.Dest, startingPort)
+			dst := fmt.Sprintf("%s:%d", probe.Target, startingPort)
 			sequence++
 			startingPort++
 
@@ -60,12 +63,11 @@ func probeHandler(dst string) {
 
 			probeResponse := ProbeResponse{TTL: currentTTL}
 
-			response, lookupErr := lookupResponses(probe.Dest)
+			response, lookupErr := lookupResponses(probe.Target)
 			if lookupErr != nil {
 				log.Info(lookupErr)
 
-				// TODO: dirty. remove.
-				probe.Responses = append(probe.Responses, probeResponse)
+				probe.Hops = append(probe.Hops, probeResponse)
 
 				continue
 			}
@@ -73,12 +75,13 @@ func probeHandler(dst string) {
 			// FOR TESTING ONLY
 			thisResponse := response[0]
 			rtt := thisResponse.Timestamp.Sub(sentTime)
-			probeResponse.ProbeSource = thisResponse.Source.String()
+			probeResponse.IP = null.StringFrom(thisResponse.Source.String())
 			probeResponse.Time = rtt.Milliseconds()
 			probeResponse.HeaderSource = thisResponse.OriginalHeader.Src
 			probeResponse.HeaderDest = thisResponse.OriginalHeader.Dst
+			probeResponse.Responded = true
 
-			probe.Responses = append(probe.Responses, probeResponse)
+			probe.Hops = append(probe.Hops, probeResponse)
 			if thisResponse.Response.Code == 3 && !reachedDest {
 				log.Debug("Received type ", thisResponse.Response.Type, ". Stopping probes.")
 				reachedDest = true
@@ -86,14 +89,15 @@ func probeHandler(dst string) {
 		}
 		currentTTL++
 		if currentTTL == MAX_HOPS {
-			log.Info("Max hops exceeded for probe to ", probe.Dest)
+			log.Info("Max hops exceeded for probe to ", probe.Target)
 			break
 		}
 		if reachedDest {
-			log.Info("Probe complete: ", probe.Dest)
+			log.Info("Probe complete: ", probe.Target)
 		}
 	}
 	probe.EndTime = time.Now()
 	output, _ := json.Marshal(probe)
-	_ = ioutil.WriteFile("outputs/"+dst+".json", output, 0644)
+	_ = ioutil.WriteFile("outputs/"+target.Destination+".json", output, 0644)
+	go emitProbeResults(probe)
 }

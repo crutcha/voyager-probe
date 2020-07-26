@@ -74,13 +74,12 @@ func main() {
 					ticker := time.NewTicker(time.Duration(config.targets[destination].Interval) * time.Second)
 					currentTickTime := config.targets[destination].Interval
 
-					// initial probe
-					go probeHandler(destination)
+					// initial probe. pass by value should be fine here
+					go probeHandler(config.targets[destination])
 					for {
 						select {
 						case <-ticker.C:
-							go probeHandler(destination)
-							log.Info("sent")
+							go probeHandler(config.targets[destination])
 							if config.targets[destination].Interval != currentTickTime {
 								log.Info(fmt.Sprintf(
 									"Interval update received. Changing interval for %s from %d  to %d seconds\n", destination,
