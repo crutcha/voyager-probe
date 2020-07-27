@@ -10,7 +10,11 @@ import (
 	"time"
 )
 
-const PROBE_LOOKUP_TIMEOUT = 2
+const (
+	PROBE_LOOKUP_TIMEOUT  = 2
+	ICMP_STALE_AFTER      = 60
+	ICMP_CLEANUP_INTERVAL = 60
+)
 
 // TODO: cleanup on some interval or will potentially grow unchecked if we receive ICMP
 // traffic not meant for us on our socket?
@@ -116,25 +120,35 @@ func lookupResponses(dst string) ([]ICMPResponse, error) {
 	return lookupValues, err
 }
 
-func cleanupICMPResponses(responsemap *ResponseMap) {
+// Only exists to schedule icmp response hash cleanup
+func icmpCleanupHandler() {
 	for {
-		time.Sleep(1 * time.Minute)
-		responsemap.lock.Lock()
+		time.Sleep(ICMP_CLEANUP_INTERVAL * time.Second)
+		removeStaleICMPResponses(&received)
+	}
+}
 
-		// range will give us a copy of the value not a reference
-		for key, _ := range responsemap.responses {
-			value := responsemap.responses[key]
-			for i := 0; i < len(value); i++ {
-				timeSince := time.Now().Sub(value[i].Timestamp)
-				if timeSince.Seconds() >= 60 {
-					value := append(value[:i], value[i+1:]...)
-					responsemap.responses[key] = value
-				}
-			}
-			if len(responsemap.responses[key]) == 0 {
-				delete(responsemap.responses, key)
+// Broken out into it's own function to make it easier to test
+func removeStaleICMPResponses(responsemap *ResponseMap) {
+	responsemap.lock.Lock()
+
+	// range will give us a copy of the value not a reference
+	for key, response := range responsemap.responses {
+		// modifying the slice in place is a bit tricky, so just create a new one
+		// for now. we may want to revisit this.
+		newArray := make([]ICMPResponse, 0, len(response))
+		for _, value := range response {
+			timeSince := time.Now().Sub(value.Timestamp)
+			isExpired := timeSince.Seconds() >= ICMP_STALE_AFTER
+			if !isExpired {
+				newArray = append(newArray, value)
 			}
 		}
-		responsemap.lock.Unlock()
+		if len(newArray) == 0 {
+			delete(responsemap.responses, key)
+		} else {
+			responsemap.responses[key] = newArray
+		}
 	}
+	responsemap.lock.Unlock()
 }
