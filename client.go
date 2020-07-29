@@ -24,7 +24,7 @@ type DRFResponse struct {
 type ProbeTarget struct {
 	Destination string `json:"destination"`
 	Interval    uint   `json:"interval"`
-	ProbeCount  uint   `json:"probe_count"`
+	ProbeCount  int    `json:"probe_count"`
 }
 
 func getProbeTargets() ([]ProbeTarget, error) {

@@ -60,7 +60,7 @@ func probeHandler(target ProbeTarget) {
 	startingPort := 33434
 	reachedDest := false
 	for !reachedDest {
-		for i := 0; i < PROBE_COUNT; i++ {
+		for i := 0; i < target.ProbeCount; i++ {
 			dst := fmt.Sprintf("%s:%d", probe.Target, startingPort)
 			sequence++
 			startingPort++
@@ -69,7 +69,6 @@ func probeHandler(target ProbeTarget) {
 			if dialConnErr != nil {
 				panic(dialConnErr)
 			}
-			defer dialerConn.Close()
 
 			packetConn := ipv4.NewConn(dialerConn)
 			packetConn.SetTTL(currentTTL)
@@ -88,8 +87,12 @@ func probeHandler(target ProbeTarget) {
 
 				probe.Hops = append(probe.Hops, probeResponse)
 
+				// using defer was leaking sockets but explicitly closing them is not
+				dialerConn.Close()
 				continue
 			}
+
+			dialerConn.Close()
 
 			// FOR TESTING ONLY
 			thisResponse := response[0]

@@ -10,7 +10,6 @@ import (
 
 const (
 	TIMEOUT          = 30
-	PROBE_COUNT      = 3
 	CONCURRENCY      = 10
 	MAX_HOPS         = 20
 	REFRESH_INTERVAL = 1
