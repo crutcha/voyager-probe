@@ -25,11 +25,13 @@ type ProbeTarget struct {
 	Destination string `json:"destination"`
 	Interval    uint   `json:"interval"`
 	ProbeCount  int    `json:"probe_count"`
+	Type        string `json:"type"`
+	Port        int    `json:"port"`
 }
 
 func getProbeTargets() ([]ProbeTarget, error) {
 	client := &http.Client{Timeout: time.Second * 10}
-	req, _ := http.NewRequest("GET", fmt.Sprintf("https://%s/api/v1/probes/probe-targets/", voyagerServer), nil)
+	req, _ := http.NewRequest("GET", fmt.Sprintf("https://%s/api/v1/probe-targets/", voyagerServer), nil)
 	req.Header.Add("Authorization", fmt.Sprintf("Token %s", proberToken))
 
 	q := url.Values{}
@@ -83,7 +85,7 @@ func emitProbeResults(probe Probe) {
 	}
 
 	client := &http.Client{Timeout: time.Second * 10}
-	req, _ := http.NewRequest("POST", fmt.Sprintf("https://%s/api/v1/probes/probe-results/", voyagerServer), bytes.NewBuffer(payload))
+	req, _ := http.NewRequest("POST", fmt.Sprintf("https://%s/api/v1/probe-results/", voyagerServer), bytes.NewBuffer(payload))
 	req.Header.Add("Authorization", fmt.Sprintf("Token %s", proberToken))
 	req.Header.Add("Content-Type", "application/json")
 
