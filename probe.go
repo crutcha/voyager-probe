@@ -1,14 +1,18 @@
 package main
 
 import (
-	"fmt"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/ipv4"
 	"gopkg.in/guregu/null.v4"
 	"net"
 	"sync"
 	"time"
 )
+
+var probeTypeMap = map[string]ProbeExecutorFactory{
+	"tcp": NewTCPProbeExecutor,
+	"udp": NewUDPProbeExecutor,
+	// TODO: ICMP
+}
 
 type Probe struct {
 	Target    string          `json:"target"`
@@ -27,6 +31,35 @@ type ProbeResponse struct {
 	HeaderDest   net.IP      `json:"-"`
 }
 
+// This exists so we can fire off all probes for any given TTL and concurrently write back
+// results for that batch. We might want to revist what this interface looks like to get rid
+// of this...
+type ProbeBatch struct {
+	sync.Mutex
+	hops []ProbeResponse
+}
+
+func (b *ProbeBatch) Add(response ProbeResponse) {
+	b.Lock()
+	b.hops = append(b.hops, response)
+	b.Unlock()
+}
+
+func (b *ProbeBatch) IsFinal(target string) bool {
+	for _, hop := range b.hops {
+		if hop.IP.String == target {
+			return true
+		}
+	}
+	return false
+}
+
+type ProbeExecutor interface {
+	Execute(target string, port uint16, count int) ([]ProbeResponse, error)
+}
+
+type ProbeExecutorFactory func(target ProbeTarget) ProbeExecutor
+
 func updateDNSName(hop *ProbeResponse, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -36,7 +69,7 @@ func updateDNSName(hop *ProbeResponse, wg *sync.WaitGroup) {
 		// TODO: support multiple reverse lookup records?
 		names, lookupErr := net.LookupAddr(hop.IP.ValueOrZero())
 		if lookupErr != nil {
-			log.Info("Reverse lookup failed for ", hop.IP)
+			log.Debug("Reverse lookup failed for ", hop.IP)
 		}
 
 		log.Debug("Reverse lookup results: ", names)
@@ -48,77 +81,25 @@ func updateDNSName(hop *ProbeResponse, wg *sync.WaitGroup) {
 }
 
 func probeHandler(target ProbeTarget) {
-	log.Info("Starting probes to ", target.Destination)
 	probe := Probe{
 		Target:    target.Destination,
 		StartTime: time.Now(),
 		Hops:      make([]ProbeResponse, 0),
 	}
 
-	sequence := 0
-	currentTTL := 1
-	startingPort := 33434
-	reachedDest := false
-	for !reachedDest {
-		for i := 0; i < target.ProbeCount; i++ {
-			dst := fmt.Sprintf("%s:%d", probe.Target, startingPort)
-			sequence++
-			startingPort++
-
-			dialerConn, dialConnErr := net.Dial("udp", dst)
-			if dialConnErr != nil {
-				panic(dialConnErr)
-			}
-
-			packetConn := ipv4.NewConn(dialerConn)
-			packetConn.SetTTL(currentTTL)
-
-			sentTime := time.Now()
-			_, writeErr := dialerConn.Write([]byte("test"))
-			if writeErr != nil {
-				panic(writeErr)
-			}
-
-			probeResponse := ProbeResponse{TTL: currentTTL}
-
-			response, lookupErr := lookupResponses(probe.Target)
-			if lookupErr != nil {
-				log.Info(lookupErr)
-
-				probe.Hops = append(probe.Hops, probeResponse)
-
-				// using defer was leaking sockets but explicitly closing them is not
-				dialerConn.Close()
-				continue
-			}
-
-			dialerConn.Close()
-
-			// FOR TESTING ONLY
-			thisResponse := response[0]
-			rtt := thisResponse.Timestamp.Sub(sentTime)
-			probeResponse.IP = null.StringFrom(thisResponse.Source.String())
-			probeResponse.Time = rtt.Milliseconds()
-			probeResponse.HeaderSource = thisResponse.OriginalHeader.Src
-			probeResponse.HeaderDest = thisResponse.OriginalHeader.Dst
-			probeResponse.Responded = true
-
-			probe.Hops = append(probe.Hops, probeResponse)
-			if thisResponse.Response.Code == 3 && !reachedDest {
-				log.Debug("Received type ", thisResponse.Response.Type, ". Stopping probes.")
-				reachedDest = true
-			}
-		}
-		currentTTL++
-		if currentTTL == MAX_HOPS {
-			log.Info("Max hops exceeded for probe to ", probe.Target)
-			break
-		}
-		if reachedDest {
-			log.Info("Probe complete: ", probe.Target)
-		}
+	// TODO: better factory-ish thing here
+	executorFactory, ok := probeTypeMap[target.Type]
+	if !ok {
+		log.WithFields(log.Fields{"target": target}).Warn("Unsupported target protocol")
+		return
 	}
-	probe.EndTime = time.Now()
+	executor := executorFactory(target)
+	hops, hopsErr := executor.Execute(target.Destination, target.Port, target.ProbeCount)
+	if hopsErr != nil {
+		log.Warn("Error executing UDP probe: ", hopsErr)
+		return
+	}
+	probe.Hops = hops
 
 	var wg sync.WaitGroup
 	wg.Add(len(probe.Hops))
@@ -130,5 +111,6 @@ func probeHandler(target ProbeTarget) {
 	}
 	wg.Wait()
 
+	probe.EndTime = time.Now()
 	go emitProbeResults(probe)
 }

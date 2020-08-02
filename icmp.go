@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/icmp"
@@ -18,11 +19,11 @@ const (
 
 // TODO: cleanup on some interval or will potentially grow unchecked if we receive ICMP
 // traffic not meant for us on our socket?
-var received = ResponseMap{responses: map[string][]ICMPResponse{}}
+var received = ResponseMap{responses: map[string]ICMPResponse{}}
 
 type ResponseMap struct {
 	lock      sync.Mutex
-	responses map[string][]ICMPResponse
+	responses map[string]ICMPResponse
 }
 
 type ICMPResponse struct {
@@ -71,6 +72,26 @@ func startICMPListener() {
 				panic(headerErr)
 			}
 
+			// TCP and UDP will contain original header data. Some nodes will not respond with full
+			// headers but we should be able to get the first 32 bits with source/dest port info.
+			// In the case of ICMP probes, we can use sequence number as a unique identifier of the
+			// original request
+			var srcPort, dstPort uint16
+			if originalHeader.Protocol == 6 || originalHeader.Protocol == 17 {
+				srcPort = binary.BigEndian.Uint16(icmpBody[24:26])
+				dstPort = binary.BigEndian.Uint16(icmpBody[26:28])
+			}
+
+			var originalProto string
+			switch originalHeader.Protocol {
+			case 6:
+				originalProto = "tcp"
+			case 17:
+				originalProto = "udp"
+			case 1:
+				originalProto = "icmp"
+			}
+
 			response := ICMPResponse{
 				Response:       icmpMessage,
 				OriginalHeader: originalHeader,
@@ -78,15 +99,17 @@ func startICMPListener() {
 				Timestamp:      timestamp,
 			}
 
-			// We will lock based on destination of probe attempts so keying on this should be
-			// guarenteed to be unique
-			resultKey := originalHeader.Dst.String()
+			// We will use the original payload info as a key value on the lookup, for tcp/udp this
+			// can be port information. Since ICMP has no concepts of ports, we can use sequence numbers.
+			// IE: tcp:sourceport:dest:destport
+			// IE: icmp:sequence:dest
+			resultKey := fmt.Sprintf("%s:%d:%s:%d", originalProto, srcPort, originalHeader.Dst.String(), dstPort)
+			log.Debug("RESULTKEY: ", resultKey)
 			received.lock.Lock()
-			if _, exists := received.responses[resultKey]; !exists {
-				received.responses[resultKey] = []ICMPResponse{response}
-			} else {
-				received.responses[resultKey] = append(received.responses[resultKey], response)
+			if _, exists := received.responses[resultKey]; exists {
+				log.Warn("Key exists already for probe! Overwriting ", resultKey)
 			}
+			received.responses[resultKey] = response
 			received.lock.Unlock()
 			debug := fmt.Sprintf("%+v", icmpMessage)
 			log.WithFields(log.Fields{"src": thisSrc}).Debug(debug)
@@ -97,29 +120,30 @@ func startICMPListener() {
 // Channels with contexts dont really work here. Since we're still reliant on every
 // reply coming back to the same ICMP socket, there's no way to guarentee that any
 // message coming back through the channel is ACTUALLY for data we care about...
-func lookupResponses(dst string) ([]ICMPResponse, error) {
-	var lookupValues []ICMPResponse
+func lookupResponses(key string) (ICMPResponse, error) {
+	var lookupValue ICMPResponse
 	var err error
 	timeout := time.Now().Add(PROBE_LOOKUP_TIMEOUT * time.Second)
 	for tstamp := range time.Tick(500 * time.Millisecond) {
 		if tstamp.After(timeout) {
-			err = fmt.Errorf("Response lookup timed out: %s", dst)
+			err = fmt.Errorf("Response lookup timed out: %s", key)
 			break
 		}
 
 		received.lock.Lock()
-		values, ok := received.responses[dst]
+		value, ok := received.responses[key]
 		if ok {
-			lookupValues = values
-			delete(received.responses, dst)
+			lookupValue = value
+			delete(received.responses, key)
 			received.lock.Unlock()
 			break
 		}
 		received.lock.Unlock()
 	}
-	return lookupValues, err
+	return lookupValue, err
 }
 
+/*
 // Only exists to schedule icmp response hash cleanup
 func icmpCleanupHandler() {
 	for {
@@ -152,3 +176,4 @@ func removeStaleICMPResponses(responsemap *ResponseMap) {
 	}
 	responsemap.lock.Unlock()
 }
+*/

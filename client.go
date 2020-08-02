@@ -25,11 +25,13 @@ type ProbeTarget struct {
 	Destination string `json:"destination"`
 	Interval    uint   `json:"interval"`
 	ProbeCount  int    `json:"probe_count"`
+	Type        string `json:"type"`
+	Port        uint16 `json:"port"`
 }
 
 func getProbeTargets() ([]ProbeTarget, error) {
 	client := &http.Client{Timeout: time.Second * 10}
-	req, _ := http.NewRequest("GET", fmt.Sprintf("https://%s/api/v1/probes/probe-targets/", voyagerServer), nil)
+	req, _ := http.NewRequest("GET", fmt.Sprintf("https://%s/api/v1/probe-targets/", voyagerServer), nil)
 	req.Header.Add("Authorization", fmt.Sprintf("Token %s", proberToken))
 
 	q := url.Values{}
@@ -83,7 +85,7 @@ func emitProbeResults(probe Probe) {
 	}
 
 	client := &http.Client{Timeout: time.Second * 10}
-	req, _ := http.NewRequest("POST", fmt.Sprintf("https://%s/api/v1/probes/probe-results/", voyagerServer), bytes.NewBuffer(payload))
+	req, _ := http.NewRequest("POST", fmt.Sprintf("https://%s/api/v1/probe-results/", voyagerServer), bytes.NewBuffer(payload))
 	req.Header.Add("Authorization", fmt.Sprintf("Token %s", proberToken))
 	req.Header.Add("Content-Type", "application/json")
 
@@ -93,9 +95,13 @@ func emitProbeResults(probe Probe) {
 		return
 	}
 
+	// yea it's kinda dirty but we only want the ID back so whatever
+	jsonBody := make(map[string]interface{})
+	respBody, _ := ioutil.ReadAll(resp.Body)
 	if resp.StatusCode != 201 {
-		respBody, _ := ioutil.ReadAll(resp.Body)
 		log.Warn(fmt.Sprintf("POST of probe results failed: [HTTP%d] %s\n", resp.StatusCode, string(respBody)))
+	} else {
+		json.Unmarshal(respBody, &jsonBody)
+		log.Info(fmt.Sprintf("Published probe result: %+v", jsonBody["id"]))
 	}
-
 }
