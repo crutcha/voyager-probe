@@ -95,9 +95,13 @@ func emitProbeResults(probe Probe) {
 		return
 	}
 
+	// yea it's kinda dirty but we only want the ID back so whatever
+	jsonBody := make(map[string]interface{})
+	respBody, _ := ioutil.ReadAll(resp.Body)
 	if resp.StatusCode != 201 {
-		respBody, _ := ioutil.ReadAll(resp.Body)
 		log.Warn(fmt.Sprintf("POST of probe results failed: [HTTP%d] %s\n", resp.StatusCode, string(respBody)))
+	} else {
+		json.Unmarshal(respBody, &jsonBody)
+		log.Info(fmt.Sprintf("Published probe result: %+v", jsonBody["id"]))
 	}
-
 }

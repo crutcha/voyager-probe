@@ -183,7 +183,7 @@ func (u *TCPProbeExecutor) Execute(target string, port uint16, count int) ([]Pro
 		probewg.Add(count)
 
 		for i := 0; i < count; i++ {
-			go sendProbe(&probewg, &batch, target, port, currentTTL)
+			go sendTCPProbe(&probewg, &batch, target, port, currentTTL)
 		}
 		probewg.Wait()
 
@@ -195,11 +195,11 @@ func (u *TCPProbeExecutor) Execute(target string, port uint16, count int) ([]Pro
 	}
 
 	// TODO: error handling
-	log.Info("PROBE COMPLETE")
+	log.Debug("probe complete: ", target)
 	return hops, nil
 }
 
-func sendProbe(wg *sync.WaitGroup, batch *ProbeBatch, target string, port uint16, ttl int) {
+func sendTCPProbe(wg *sync.WaitGroup, batch *ProbeBatch, target string, port uint16, ttl int) {
 	// Setup a listener so OS binds a source port for us to use
 	ipAddr, addrErr := net.ResolveTCPAddr("tcp4", "0.0.0.0:0")
 	if addrErr != nil {
@@ -261,7 +261,6 @@ func sendProbe(wg *sync.WaitGroup, batch *ProbeBatch, target string, port uint16
 		probeResponse.IP = null.StringFrom(target)
 		probeResponse.Time = rtt.Milliseconds()
 		probeResponse.Responded = true
-		log.Info("Final hop: ", ttl)
 	}
 
 	batch.Add(probeResponse)
