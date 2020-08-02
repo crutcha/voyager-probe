@@ -14,6 +14,10 @@ import (
 	"time"
 )
 
+func NewTCPProbeExecutor(target ProbeTarget) ProbeExecutor {
+	return &TCPProbeExecutor{target}
+}
+
 type TCPHeader struct {
 	Source      uint16
 	Destination uint16
@@ -244,7 +248,7 @@ func sendTCPProbe(wg *sync.WaitGroup, batch *ProbeBatch, target string, port uin
 		log.Debug("TCP LOOKUP KEY: ", lookupKey)
 		response, lookupErr := lookupResponses(lookupKey)
 		if lookupErr != nil {
-			log.Info(lookupErr)
+			log.Debug(lookupErr)
 			batch.Add(probeResponse)
 			wg.Done()
 			return

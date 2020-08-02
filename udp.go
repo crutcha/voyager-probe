@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+func NewUDPProbeExecutor(target ProbeTarget) ProbeExecutor {
+	return &UDPProbeExecutor{target}
+}
+
 type UDPProbeExecutor struct {
 	ProbeTarget
 }
@@ -69,7 +73,7 @@ func sendUDPProbe(wg *sync.WaitGroup, batch *ProbeBatch, target string, port uin
 	lookupKey := fmt.Sprintf("udp:%s:%s:%d", srcPort, target, port)
 	response, lookupErr := lookupResponses(lookupKey)
 	if lookupErr != nil {
-		log.Info(lookupErr)
+		log.Debug(lookupErr)
 
 		batch.Add(probeResponse)
 

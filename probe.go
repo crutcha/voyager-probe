@@ -1,13 +1,18 @@
 package main
 
 import (
-	"fmt"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v4"
 	"net"
 	"sync"
 	"time"
 )
+
+var probeTypeMap = map[string]ProbeExecutorFactory{
+	"tcp": NewTCPProbeExecutor,
+	"udp": NewUDPProbeExecutor,
+	// TODO: ICMP
+}
 
 type Probe struct {
 	Target    string          `json:"target"`
@@ -53,6 +58,8 @@ type ProbeExecutor interface {
 	Execute(target string, port uint16, count int) ([]ProbeResponse, error)
 }
 
+type ProbeExecutorFactory func(target ProbeTarget) ProbeExecutor
+
 func updateDNSName(hop *ProbeResponse, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -62,7 +69,7 @@ func updateDNSName(hop *ProbeResponse, wg *sync.WaitGroup) {
 		// TODO: support multiple reverse lookup records?
 		names, lookupErr := net.LookupAddr(hop.IP.ValueOrZero())
 		if lookupErr != nil {
-			log.Info("Reverse lookup failed for ", hop.IP)
+			log.Debug("Reverse lookup failed for ", hop.IP)
 		}
 
 		log.Debug("Reverse lookup results: ", names)
@@ -81,27 +88,18 @@ func probeHandler(target ProbeTarget) {
 	}
 
 	// TODO: better factory-ish thing here
-	if target.Type == "udp" {
-		executor := UDPProbeExecutor{target}
-		hops, hopsErr := executor.Execute(target.Destination, target.Port, target.ProbeCount)
-		if hopsErr != nil {
-			log.Warn("Error executing UDP probe: ", hopsErr)
-			return
-		}
-		probe.Hops = hops
-	} else if target.Type == "tcp" {
-		log.Debug(fmt.Sprintf("TARGET: %+v", target))
-		executor := TCPProbeExecutor{target}
-		hops, hopsErr := executor.Execute(target.Destination, target.Port, target.ProbeCount)
-		if hopsErr != nil {
-			log.Warn("Error executing UDP probe: ", hopsErr)
-			return
-		}
-		probe.Hops = hops
-	} else {
-		log.Warn("Unsupported target protocol")
+	executorFactory, ok := probeTypeMap[target.Type]
+	if !ok {
+		log.WithFields(log.Fields{"target": target}).Warn("Unsupported target protocol")
 		return
 	}
+	executor := executorFactory(target)
+	hops, hopsErr := executor.Execute(target.Destination, target.Port, target.ProbeCount)
+	if hopsErr != nil {
+		log.Warn("Error executing UDP probe: ", hopsErr)
+		return
+	}
+	probe.Hops = hops
 
 	var wg sync.WaitGroup
 	wg.Add(len(probe.Hops))
