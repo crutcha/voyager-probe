@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/guregu/null.v4"
 	"net"
@@ -25,8 +26,31 @@ type ProbeResponse struct {
 	HeaderDest   net.IP      `json:"-"`
 }
 
+// This exists so we can fire off all probes for any given TTL and concurrently write back
+// results for that batch. We might want to revist what this interface looks like to get rid
+// of this...
+type ProbeBatch struct {
+	sync.Mutex
+	hops []ProbeResponse
+}
+
+func (b *ProbeBatch) Add(response ProbeResponse) {
+	b.Lock()
+	b.hops = append(b.hops, response)
+	b.Unlock()
+}
+
+func (b *ProbeBatch) IsFinal(target string) bool {
+	for _, hop := range b.hops {
+		if hop.IP.String == target {
+			return true
+		}
+	}
+	return false
+}
+
 type ProbeExecutor interface {
-	Execute(target string, port, count int) ([]ProbeResponse, error)
+	Execute(target string, port uint16, count int) ([]ProbeResponse, error)
 }
 
 func updateDNSName(hop *ProbeResponse, wg *sync.WaitGroup) {
@@ -65,6 +89,15 @@ func probeHandler(target ProbeTarget) {
 			return
 		}
 		probe.Hops = hops
+	} else if target.Type == "tcp" {
+		log.Debug(fmt.Sprintf("TARGET: %+v", target))
+		executor := TCPProbeExecutor{target}
+		hops, hopsErr := executor.Execute(target.Destination, target.Port, target.ProbeCount)
+		if hopsErr != nil {
+			log.Warn("Error executing UDP probe: ", hopsErr)
+			return
+		}
+		probe.Hops = hops
 	} else {
 		log.Warn("Unsupported target protocol")
 		return
@@ -80,5 +113,6 @@ func probeHandler(target ProbeTarget) {
 	}
 	wg.Wait()
 
+	probe.EndTime = time.Now()
 	go emitProbeResults(probe)
 }

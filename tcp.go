@@ -10,6 +10,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,12 +19,12 @@ type TCPHeader struct {
 	Destination uint16
 	SeqNum      uint32
 	AckNum      uint32
-	DataOffset  uint8 // 4 bits
-	Reserved    uint8 // 3 bits
-	ECN         uint8 // 3 bits
-	Ctrl        uint8 // 6 bits
+	DataOffset  uint8
+	Reserved    uint8
+	ECN         uint8
+	Ctrl        uint8
 	Window      uint16
-	Checksum    uint16 // Kernel will set this if it's 0
+	Checksum    uint16
 	Urgent      uint16
 	Options     []TCPOption
 }
@@ -152,7 +153,7 @@ func craftTCPSYNHeader(src, dst net.IP, srcPort, dstPort uint16) []byte {
 	// Instead of doing 2 passes through Marshal, update byte array in palce
 	checkSum := calcTCPChecksum(payload, srcBytes, dstBytes)
 	checksumBytes := make([]byte, 2)
-	binary.LittleEndian.PutUint16(checksumBytes, checkSum)
+	binary.LittleEndian.PutUint16(checksumBytes, checkSum) // Why is this little endian?
 	payload[17], payload[18] = checksumBytes[0], checksumBytes[1]
 
 	return payload
@@ -162,80 +163,107 @@ type TCPProbeExecutor struct {
 	ProbeTarget
 }
 
-func (u *TCPProbeExecutor) Execute(target string, port, count int) ([]ProbeResponse, error) {
+func (u *TCPProbeExecutor) Execute(target string, port uint16, count int) ([]ProbeResponse, error) {
+	// LookupAddr will return IPs even if IPs are passed in. For domain name targets, we'll only return
+	// the first result, at least for now
+	addrResult, addrErr := net.LookupHost(target)
+	if addrErr != nil {
+		return nil, addrErr
+	}
+	log.Debug(fmt.Sprintf("Look result: %s -> %s", target, addrResult[0]))
+	target = addrResult[0]
+
 	log.Info("Starting TCP probes to ", target)
 
 	currentTTL := 1
-	reachedDest := false
 	hops := make([]ProbeResponse, 0)
-	for !reachedDest {
+	for currentTTL <= MAX_HOPS {
+		var probewg sync.WaitGroup
+		batch := ProbeBatch{hops: make([]ProbeResponse, 0, count)}
+		probewg.Add(count)
+
 		for i := 0; i < count; i++ {
-			rawConn, rawErr := net.Dial("ip4:tcp", target)
-			if rawErr != nil {
-				log.Warn("Error setting up raw socket for TCP: ", rawErr)
-			}
-
-			ip4Conn := ipv4.NewConn(rawConn)
-			ip4Conn.SetTTL(currentTTL)
-
-			srcIP := net.ParseIP(rawConn.LocalAddr().String())
-			dstIP := net.ParseIP(target)
-			payload := craftTCPSYNHeader(srcIP, dstIP, 32018, port)
-			rawConn.Write(payload)
-			reply := make([]byte, 1514)
-			fmt.Println("written")
-
-			fmt.Println("Wait for reply")
-			rawConn.SetReadDeadline(time.Now().Add(2 * time.Second))
-			readBytes, readErr := rawConn.Read(reply)
-			fmt.Println("Done waiting")
-
-			sentTime := time.Now()
-			_, writeErr := dialerConn.Write([]byte("test"))
-			if writeErr != nil {
-				panic(writeErr)
-			}
-
-			probeResponse := ProbeResponse{TTL: currentTTL}
-
-			response, lookupErr := lookupResponses(target)
-			if lookupErr != nil {
-				log.Info(lookupErr)
-
-				hops = append(hops, probeResponse)
-
-				// using defer was leaking sockets but explicitly closing them is not
-				dialerConn.Close()
-				continue
-			}
-
-			dialerConn.Close()
-
-			// FOR TESTING ONLY
-			thisResponse := response[0]
-			rtt := thisResponse.Timestamp.Sub(sentTime)
-			probeResponse.IP = null.StringFrom(thisResponse.Source.String())
-			probeResponse.Time = rtt.Milliseconds()
-			probeResponse.HeaderSource = thisResponse.OriginalHeader.Src
-			probeResponse.HeaderDest = thisResponse.OriginalHeader.Dst
-			probeResponse.Responded = true
-
-			hops = append(hops, probeResponse)
-			if thisResponse.Response.Code == 3 && !reachedDest {
-				log.Debug("Received type ", thisResponse.Response.Type, ". Stopping probes.")
-				reachedDest = true
-			}
+			go sendProbe(&probewg, &batch, target, port, currentTTL)
 		}
+		probewg.Wait()
+
+		hops = append(hops, batch.hops...)
 		currentTTL++
-		if currentTTL == MAX_HOPS {
-			log.Info("Max hops exceeded for probe to ", target)
+		if batch.IsFinal(target) {
 			break
-		}
-		if reachedDest {
-			log.Info("Probe complete: ", target)
 		}
 	}
 
 	// TODO: error handling
+	log.Info("PROBE COMPLETE")
 	return hops, nil
+}
+
+func sendProbe(wg *sync.WaitGroup, batch *ProbeBatch, target string, port uint16, ttl int) {
+	// Setup a listener so OS binds a source port for us to use
+	ipAddr, addrErr := net.ResolveTCPAddr("tcp4", "0.0.0.0:0")
+	if addrErr != nil {
+		log.Warn("IPAddr err: ", addrErr)
+		return
+	}
+
+	rawListener, listenerErr := net.ListenTCP("tcp4", ipAddr)
+	if listenerErr != nil {
+		log.Warn("Error setting up TCP listener: ", listenerErr)
+		return
+	}
+	defer rawListener.Close()
+
+	// Use the port we got from bind in new socket towards target
+	rawConn, rawErr := net.Dial("ip4:tcp", target)
+	if rawErr != nil {
+		log.Warn("Error creating socket towards target: ", rawErr)
+		return
+	}
+	defer rawConn.Close()
+	ip4Conn := ipv4.NewConn(rawConn)
+	ip4Conn.SetTTL(ttl)
+
+	sourcePortString := strings.Split(rawListener.Addr().String(), ":")[1]
+	sourcePortInt, _ := strconv.Atoi(sourcePortString)
+	srcIP := net.ParseIP(rawConn.LocalAddr().String())
+	dstIP := net.ParseIP(target)
+	payload := craftTCPSYNHeader(srcIP, dstIP, uint16(sourcePortInt), port)
+	sentTime := time.Now()
+
+	rawConn.Write(payload)
+	reply := make([]byte, 1514)
+	rawConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	// We only care to see if there was an error or not, what's returned to us
+	// do not matter. Any response at all means a TCP handshake is being attempted.
+	probeResponse := ProbeResponse{TTL: ttl}
+	_, readErr := rawConn.Read(reply)
+	if readErr != nil {
+		lookupKey := fmt.Sprintf("tcp:%s:%s:%d", sourcePortString, target, port)
+		log.Debug("TCP LOOKUP KEY: ", lookupKey)
+		response, lookupErr := lookupResponses(lookupKey)
+		if lookupErr != nil {
+			log.Info(lookupErr)
+			batch.Add(probeResponse)
+			wg.Done()
+			return
+		}
+
+		rtt := response.Timestamp.Sub(sentTime)
+		probeResponse.IP = null.StringFrom(response.Source.String())
+		probeResponse.Time = rtt.Milliseconds()
+		probeResponse.HeaderSource = response.OriginalHeader.Src
+		probeResponse.HeaderDest = response.OriginalHeader.Dst
+		probeResponse.Responded = true
+	} else {
+		rtt := time.Now().Sub(sentTime)
+		probeResponse.IP = null.StringFrom(target)
+		probeResponse.Time = rtt.Milliseconds()
+		probeResponse.Responded = true
+		log.Info("Final hop: ", ttl)
+	}
+
+	batch.Add(probeResponse)
+	wg.Done()
 }

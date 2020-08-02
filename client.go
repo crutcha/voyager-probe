@@ -26,7 +26,7 @@ type ProbeTarget struct {
 	Interval    uint   `json:"interval"`
 	ProbeCount  int    `json:"probe_count"`
 	Type        string `json:"type"`
-	Port        int    `json:"port"`
+	Port        uint16 `json:"port"`
 }
 
 func getProbeTargets() ([]ProbeTarget, error) {

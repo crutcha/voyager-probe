@@ -13,7 +13,7 @@ type UDPProbeExecutor struct {
 	ProbeTarget
 }
 
-func (u *UDPProbeExecutor) Execute(target string, port, count int) ([]ProbeResponse, error) {
+func (u *UDPProbeExecutor) Execute(target string, port uint16, count int) ([]ProbeResponse, error) {
 	log.Info("Starting UDP probes to ", target)
 
 	currentTTL := 1
@@ -55,17 +55,16 @@ func (u *UDPProbeExecutor) Execute(target string, port, count int) ([]ProbeRespo
 			dialerConn.Close()
 
 			// FOR TESTING ONLY
-			thisResponse := response[0]
-			rtt := thisResponse.Timestamp.Sub(sentTime)
-			probeResponse.IP = null.StringFrom(thisResponse.Source.String())
+			rtt := response.Timestamp.Sub(sentTime)
+			probeResponse.IP = null.StringFrom(response.Source.String())
 			probeResponse.Time = rtt.Milliseconds()
-			probeResponse.HeaderSource = thisResponse.OriginalHeader.Src
-			probeResponse.HeaderDest = thisResponse.OriginalHeader.Dst
+			probeResponse.HeaderSource = response.OriginalHeader.Src
+			probeResponse.HeaderDest = response.OriginalHeader.Dst
 			probeResponse.Responded = true
 
 			hops = append(hops, probeResponse)
-			if thisResponse.Response.Code == 3 && !reachedDest {
-				log.Debug("Received type ", thisResponse.Response.Type, ". Stopping probes.")
+			if response.Response.Code == 3 && !reachedDest {
+				log.Debug("Received type ", response.Response.Type, ". Stopping probes.")
 				reachedDest = true
 			}
 		}
