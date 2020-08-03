@@ -11,37 +11,13 @@ func TestIcmpCleanupNoAction(t *testing.T) {
 	response1 := ICMPResponse{
 		Timestamp: time.Now(),
 	}
-	responsemap := ResponseMap{responses: map[string][]ICMPResponse{
-		"test-node": []ICMPResponse{response1},
+	responsemap := ResponseMap{responses: map[string]ICMPResponse{
+		"test-node": response1,
 	}}
 
 	removeStaleICMPResponses(&responsemap)
-	responses, ok := responsemap.responses["test-node"]
+	_, ok := responsemap.responses["test-node"]
 
-	assert.Equal(1, len(responses), "response not cleaned up")
-	assert.Equal(true, ok, "test-node key exists")
-}
-
-func TestIcmpCleanupSingleEntryKeyExists(t *testing.T) {
-	assert := assert.New(t)
-	response1 := ICMPResponse{
-		Timestamp: time.Now(),
-	}
-	response2 := ICMPResponse{
-		Timestamp: time.Now().Add(time.Duration(-2) * time.Minute),
-	}
-	response3 := ICMPResponse{
-		Timestamp: time.Now(),
-		//Timestamp: time.Now().Add(time.Duration(-30) * time.Second),
-	}
-	responsemap := ResponseMap{responses: map[string][]ICMPResponse{
-		"test-node": []ICMPResponse{response1, response2, response3},
-	}}
-
-	removeStaleICMPResponses(&responsemap)
-	responses, ok := responsemap.responses["test-node"]
-
-	assert.Equal(2, len(responses), "only 1 response removed, key still exists")
 	assert.Equal(true, ok, "test-node key exists")
 }
 
@@ -51,14 +27,38 @@ func TestIcmpCleanupRemoveKey(t *testing.T) {
 		Timestamp: time.Now().Add(time.Duration(-2) * time.Minute),
 	}
 	response2 := ICMPResponse{
-		Timestamp: time.Now().Add(time.Duration(-2) * time.Minute),
+		Timestamp: time.Now().Add(time.Duration(-15) * time.Second),
 	}
-	responsemap := ResponseMap{responses: map[string][]ICMPResponse{
-		"test-node": []ICMPResponse{response1, response2},
+	responsemap := ResponseMap{responses: map[string]ICMPResponse{
+		"test-1": response1,
+		"test-2": response2,
 	}}
 
 	removeStaleICMPResponses(&responsemap)
-	_, ok := responsemap.responses["test-node"]
+	_, test1ok := responsemap.responses["test-1"]
+	_, test2ok := responsemap.responses["test-2"]
 
-	assert.Equal(false, ok, "test-node key removed")
+	assert.Equal(false, test1ok, "test-1 key removed")
+	assert.Equal(true, test2ok, "test-2 key was not removed")
+}
+
+func TestResponseLookup(t *testing.T) {
+	assert := assert.New(t)
+	response1 := ICMPResponse{
+		Timestamp: time.Now().Add(time.Duration(-2) * time.Minute),
+	}
+	response2 := ICMPResponse{
+		Timestamp: time.Now().Add(time.Duration(-15) * time.Second),
+	}
+	received = ResponseMap{responses: map[string]ICMPResponse{
+		"test-1": response1,
+		"test-2": response2,
+	}}
+
+	value1, lookupErr1 := lookupResponses("test-1")
+	_, lookupErr2 := lookupResponses("test-3")
+	assert.Equal(value1, response1, "lookup failed")
+	assert.Equal(nil, lookupErr1, "lookup err is nill")
+	assert.EqualError(lookupErr2, "Response lookup timed out: test-3")
+
 }

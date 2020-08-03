@@ -143,7 +143,6 @@ func lookupResponses(key string) (ICMPResponse, error) {
 	return lookupValue, err
 }
 
-/*
 // Only exists to schedule icmp response hash cleanup
 func icmpCleanupHandler() {
 	for {
@@ -154,26 +153,17 @@ func icmpCleanupHandler() {
 
 // Broken out into it's own function to make it easier to test
 func removeStaleICMPResponses(responsemap *ResponseMap) {
+	log.Debug("Starting ICMP stale response cleanup")
 	responsemap.lock.Lock()
 
 	// range will give us a copy of the value not a reference
 	for key, response := range responsemap.responses {
-		// modifying the slice in place is a bit tricky, so just create a new one
-		// for now. we may want to revisit this.
-		newArray := make([]ICMPResponse, 0, len(response))
-		for _, value := range response {
-			timeSince := time.Now().Sub(value.Timestamp)
-			isExpired := timeSince.Seconds() >= ICMP_STALE_AFTER
-			if !isExpired {
-				newArray = append(newArray, value)
-			}
-		}
-		if len(newArray) == 0 {
+		timeSince := time.Now().Sub(response.Timestamp)
+		isExpired := timeSince.Seconds() >= ICMP_STALE_AFTER
+		if isExpired {
 			delete(responsemap.responses, key)
-		} else {
-			responsemap.responses[key] = newArray
 		}
 	}
 	responsemap.lock.Unlock()
+	log.Debug("ICMP stale response cleanup done")
 }
-*/
