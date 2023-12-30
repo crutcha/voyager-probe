@@ -3,9 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -46,7 +47,20 @@ func main() {
 
 	log.Info("Starting...")
 
-	startICMPListener()
+	/*
+		TODO: icmp listener is failing, gets stuck in some weird loop, need to figure out why
+		WARN[2023-12-29 19:47:15] invalid connection
+		WARN[2023-12-29 19:47:15] Key exists already for probe! Overwriting :0:0.0.0.0:0
+		WARN[2023-12-29 19:47:15] invalid connection
+		WARN[2023-12-29 19:47:15] Key exists already for probe! Overwriting :0:0.0.0.0:0
+		WARN[2023-12-29 19:47:15] invalid connection
+		WARN[2023-12-29 19:47:15] Key exists already for probe! Overwriting :0:0.0.0.0:0
+		WARN[2023-12-29 19:47:15] invalid connection
+		WARN[2023-12-29 19:47:15] Key exists already for probe! Overwriting :0:0.0.0.0:0
+		WARN[2023-12-29 19:47:15] invalid connection
+		WARN[2023-12-29 19:47:15] Key exists already for probe! Overwriting :0:0.0.0.0:0
+	*/
+	//startICMPListener()
 	config := NewConfig()
 	currentProbers := make(map[string]chan int)
 	for {

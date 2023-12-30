@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 const pageSize int = 100
@@ -25,14 +26,16 @@ type ProbeTarget struct {
 	Destination string `json:"destination"`
 	Interval    uint   `json:"interval"`
 	ProbeCount  int    `json:"probe_count"`
-	Type        string `json:"type"`
+	Type        string `json:"probe_type"`
 	Port        uint16 `json:"port"`
 }
 
 func getProbeTargets() ([]ProbeTarget, error) {
 	client := &http.Client{Timeout: time.Second * 10}
-	req, _ := http.NewRequest("GET", fmt.Sprintf("https://%s/api/v1/probe-targets/", voyagerServer), nil)
+	req, _ := http.NewRequest("GET", fmt.Sprintf("https://%s/api/v1/probes/probe-targets/", voyagerServer), nil)
 	req.Header.Add("Authorization", fmt.Sprintf("Token %s", proberToken))
+
+	log.Infof("Target URI: %s\n", req.URL)
 
 	q := url.Values{}
 	q.Add("limit", strconv.Itoa(pageSize))
@@ -52,6 +55,7 @@ func getProbeTargets() ([]ProbeTarget, error) {
 		}
 
 		body, bodyErr := ioutil.ReadAll(resp.Body)
+		log.Debugf("body: %s", string(body))
 		if bodyErr != nil {
 			log.Warn(bodyErr)
 			return nil, bodyErr
