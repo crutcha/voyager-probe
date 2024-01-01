@@ -46,6 +46,7 @@ func main() {
 	}
 
 	log.Info("Starting...")
+	startWebsocketClient(voyagerServer)
 
 	/*
 		TODO: icmp listener is failing, gets stuck in some weird loop, need to figure out why

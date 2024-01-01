@@ -2,14 +2,15 @@ package main
 
 import (
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"sync"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type VoyagerConfig struct {
 	token           string
-	server          string
+	Server          string
 	lock            sync.Mutex
 	targets         map[string]ProbeTarget
 	refreshInterval uint
@@ -31,7 +32,7 @@ func NewConfig() *VoyagerConfig {
 
 	return &VoyagerConfig{
 		token:           proberToken,
-		server:          voyagerServer,
+		Server:          voyagerServer,
 		targets:         make(map[string]ProbeTarget),
 		refreshInterval: REFRESH_INTERVAL,
 	}
