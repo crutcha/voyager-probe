@@ -46,11 +46,7 @@ func main() {
 	}
 
 	log.Info("Starting...")
-	websocketClient, clientErr := NewWebsocketClient(voyagerServer)
-	if clientErr != nil {
-		log.Fatalf("error creating websocket client: %w", clientErr)
-	}
-	go websocketClient.Run()
+	go startWebsocketLoop(voyagerServer)
 
 	/*
 		TODO: icmp listener is failing, gets stuck in some weird loop, need to figure out why
