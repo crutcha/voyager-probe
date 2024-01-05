@@ -22,12 +22,48 @@ type DRFResponse struct {
 	Results  []ProbeTarget `json:"results"`
 }
 
+type Prober struct {
+	User    string        `json:"user"`
+	Name    string        `json:"name"`
+	Version uint          `json:"version"`
+	Targets []ProbeTarget `json:"targets"`
+}
+
 type ProbeTarget struct {
 	Destination string `json:"destination"`
 	Interval    uint   `json:"interval"`
 	ProbeCount  int    `json:"probe_count"`
 	Type        string `json:"probe_type"`
 	Port        uint16 `json:"port"`
+}
+
+func getProbeInfo() (Prober, error) {
+	client := &http.Client{Timeout: time.Second * 10}
+	req, _ := http.NewRequest("GET", fmt.Sprintf("https://%s/api/v1/probes/prober/", voyagerServer), nil)
+	req.Header.Add("Authorization", fmt.Sprintf("Token %s", proberToken))
+
+	var proberInfo Prober
+	log.Infof("Target URI: %s\n", req.URL)
+	resp, requestErr := client.Do(req)
+	if requestErr != nil {
+		log.Warn(requestErr)
+		return proberInfo, requestErr
+	}
+
+	body, bodyErr := ioutil.ReadAll(resp.Body)
+	if bodyErr != nil {
+		return proberInfo, bodyErr
+	}
+	log.Debugf("body: %s", string(body))
+
+	if resp.StatusCode != 200 {
+		err := fmt.Errorf("%s %s", resp.Status, body)
+		log.Warn(err)
+		return proberInfo, err
+	}
+
+	json.Unmarshal(body, &proberInfo)
+	return proberInfo, nil
 }
 
 func getProbeTargets() ([]ProbeTarget, error) {

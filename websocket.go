@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"os/signal"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -70,12 +68,12 @@ func (wsc *WebsocketClient) Close() {
 	wsc.Conn.Close()
 }
 
-func startWebsocketLoop(server string) {
+func startWebsocketLoop(server string, config *VoyagerConfig) {
 	delay := 1 * time.Second
 	for {
 		log.Infof("websocket creation backoff timer: %d", delay)
 		time.Sleep(delay)
-		clientErr := startWebsocketClient(server)
+		clientErr := startWebsocketClient(server, config)
 		if clientErr != nil {
 			delay *= 2
 			log.Warn("error in websocket client loop: %w", clientErr)
@@ -84,7 +82,7 @@ func startWebsocketLoop(server string) {
 }
 
 // TODO: could the PING frequency be controlled by configuration?
-func startWebsocketClient(server string) error {
+func startWebsocketClient(server string, config *VoyagerConfig) error {
 	url := url.URL{Scheme: "ws", Host: server, Path: WS_PATH}
 	header := http.Header{"Authorization": {fmt.Sprintf("Token %s", proberToken)}}
 	conn, dialMsg, err := websocket.DefaultDialer.Dial(url.String(), header)
@@ -99,10 +97,10 @@ func startWebsocketClient(server string) error {
 		conn.Close()
 	}()
 
-	interrupt := make(chan os.Signal, 1)
+	//interrupt := make(chan os.Signal, 1)
 	done := make(chan int)
 	readChan := make(chan string)
-	signal.Notify(interrupt, os.Interrupt)
+	//signal.Notify(interrupt, os.Interrupt)
 	ticker := time.NewTicker(PING_INTERVAL)
 	defer func() {
 		log.Info("DEFFERED TICKER STOP")
@@ -122,7 +120,7 @@ func startWebsocketClient(server string) error {
 			log.Debugf("read channel msg: %s", string(readMsg))
 		case <-ticker.C:
 			log.Infof("sending ping")
-			msg := ProbeWebsocketMessage{Message: "PING", Version: FAKE_VERSION}
+			msg := ProbeWebsocketMessage{Message: "PING", Version: config.Version}
 			msgBytes, marshalErr := json.Marshal(&msg)
 			if marshalErr != nil {
 				log.Fatalf("error with marshalling websocket message: %s", marshalErr)
@@ -131,20 +129,20 @@ func startWebsocketClient(server string) error {
 			if err != nil {
 				return fmt.Errorf("websocket write err: %w", err)
 			}
-		case <-interrupt:
-			log.Infof("websocket goroutine receieved interrupt signal")
+			//case <-interrupt:
+			//	log.Infof("websocket goroutine receieved interrupt signal")
 
-			// Cleanly close the connection by sending a close message and then
-			// waiting (with timeout) for the server to close the connection.
-			err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-			if err != nil {
-				log.Warnf("Error closing websocket channel: %s", err)
-				return nil
-			}
+			//	// Cleanly close the connection by sending a close message and then
+			//	// waiting (with timeout) for the server to close the connection.
+			//	err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			//	if err != nil {
+			//		log.Warnf("Error closing websocket channel: %s", err)
+			//		return nil
+			//	}
 
-			// TODO: we might need to cleanly shut down other things too so eventually remove
-			// the exit here
-			os.Exit(1)
+			//	// TODO: we might need to cleanly shut down other things too so eventually remove
+			//	// the exit here
+			//	os.Exit(1)
 		}
 	}
 

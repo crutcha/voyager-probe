@@ -46,7 +46,8 @@ func main() {
 	}
 
 	log.Info("Starting...")
-	go startWebsocketLoop(voyagerServer)
+	config := NewConfig()
+	go startWebsocketLoop(voyagerServer, config)
 
 	/*
 		TODO: icmp listener is failing, gets stuck in some weird loop, need to figure out why
@@ -62,7 +63,6 @@ func main() {
 		WARN[2023-12-29 19:47:15] Key exists already for probe! Overwriting :0:0.0.0.0:0
 	*/
 	//startICMPListener()
-	config := NewConfig()
 	currentProbers := make(map[string]chan int)
 	for {
 		// TODO: LOCKING IN HERE

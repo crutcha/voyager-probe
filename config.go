@@ -14,6 +14,7 @@ type VoyagerConfig struct {
 	lock            sync.Mutex
 	targets         map[string]ProbeTarget
 	refreshInterval uint
+	Version         uint
 }
 
 func NewConfig() *VoyagerConfig {
@@ -40,16 +41,25 @@ func NewConfig() *VoyagerConfig {
 
 func (c *VoyagerConfig) updateTargets() {
 	log.Info("Updating targets from voyager server")
-	targetDefinitions, targetErr := getProbeTargets()
-	if targetErr != nil {
-		log.Warn("Unable to update targets: ", targetErr)
+	/*
+		targetDefinitions, targetErr := getProbeTargets()
+		if targetErr != nil {
+			log.Warn("Unable to update targets: ", targetErr)
+			return
+		}
+	*/
+
+	proberInfo, proberErr := getProbeInfo()
+	if proberErr != nil {
+		log.Warn("Unable to update targets: ", proberErr)
 		return
 	}
+	c.Version = proberInfo.Version
 
 	// destination is guarenteed to be unique
 	c.lock.Lock()
 	newTargetHash := make(map[string]ProbeTarget)
-	for _, target := range targetDefinitions {
+	for _, target := range proberInfo.Targets {
 		newTargetHash[target.Destination] = target
 	}
 
