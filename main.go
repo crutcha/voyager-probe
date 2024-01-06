@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	TIMEOUT          = 30
-	CONCURRENCY      = 10
-	MAX_HOPS         = 20
-	REFRESH_INTERVAL = 1
+	TIMEOUT     = 30
+	CONCURRENCY = 10
+	MAX_HOPS    = 20
+	// TODO: can probbably just get rid of this with the websocket implementation
+	REFRESH_INTERVAL = 2
 )
 
 var proberToken string
@@ -47,6 +48,7 @@ func main() {
 
 	log.Info("Starting...")
 	config := NewConfig()
+	config.updateTargets()
 	go startWebsocketLoop(voyagerServer, config)
 
 	/*
@@ -65,8 +67,6 @@ func main() {
 	//startICMPListener()
 	currentProbers := make(map[string]chan int)
 	for {
-		// TODO: LOCKING IN HERE
-		config.updateTargets()
 		// Remove stale targets first
 		for currentDest, doneChan := range currentProbers {
 			if _, ok := config.targets[currentDest]; !ok {

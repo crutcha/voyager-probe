@@ -66,5 +66,6 @@ func (c *VoyagerConfig) updateTargets() {
 	c.targets = newTargetHash
 	c.lock.Unlock()
 
-	log.Debug(fmt.Sprintf("New targets: %+v", newTargetHash))
+	log.Infof("Updated local configuration to version %d", c.Version)
+	log.Infof(fmt.Sprintf("New targets: %+v", newTargetHash))
 }

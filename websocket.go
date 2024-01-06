@@ -70,19 +70,25 @@ func (wsc *WebsocketClient) Close() {
 
 func startWebsocketLoop(server string, config *VoyagerConfig) {
 	delay := 1 * time.Second
+	success := false
 	for {
-		log.Infof("websocket creation backoff timer: %d", delay)
+		log.Infof("websocket creation backoff timer: %s", delay)
 		time.Sleep(delay)
-		clientErr := startWebsocketClient(server, config)
+		clientErr := startWebsocketClient(server, config, &success)
 		if clientErr != nil {
-			delay *= 2
 			log.Warn("error in websocket client loop: %w", clientErr)
+			if !success {
+				delay *= 2
+			} else {
+				success = false
+				delay = 1 * time.Second
+			}
 		}
 	}
 }
 
 // TODO: could the PING frequency be controlled by configuration?
-func startWebsocketClient(server string, config *VoyagerConfig) error {
+func startWebsocketClient(server string, config *VoyagerConfig, success *bool) error {
 	url := url.URL{Scheme: "ws", Host: server, Path: WS_PATH}
 	header := http.Header{"Authorization": {fmt.Sprintf("Token %s", proberToken)}}
 	conn, dialMsg, err := websocket.DefaultDialer.Dial(url.String(), header)
@@ -91,21 +97,14 @@ func startWebsocketClient(server string, config *VoyagerConfig) error {
 	}
 
 	log.Infof("websocket dial successful to %s: %+v", server, dialMsg)
+	*success = true
 	// we want to try and reconnect if we hit an error....
-	defer func() {
-		log.Info("DEFERRED CONN CLOSE")
-		conn.Close()
-	}()
+	defer conn.Close()
 
-	//interrupt := make(chan os.Signal, 1)
 	done := make(chan int)
-	readChan := make(chan string)
-	//signal.Notify(interrupt, os.Interrupt)
+	readChan := make(chan []byte)
 	ticker := time.NewTicker(PING_INTERVAL)
-	defer func() {
-		log.Info("DEFFERED TICKER STOP")
-		ticker.Stop()
-	}()
+	defer ticker.Stop()
 	go wsReceive(conn, done, readChan)
 
 	// TODO: how do we detect if server went offline abruptly?
@@ -117,9 +116,17 @@ func startWebsocketClient(server string, config *VoyagerConfig) error {
 			log.Infof("DONE CHAN HIT")
 			return fmt.Errorf("read channel closed")
 		case readMsg := <-readChan:
+			var probeMsg ProbeWebsocketMessage
+			probeUnmarshalErr := json.Unmarshal(readMsg, &probeMsg)
+			if probeUnmarshalErr != nil {
+				return fmt.Errorf("Error receiving websocket signal from server: %w", probeUnmarshalErr)
+			}
+			if probeMsg.Message == "UPDATE" {
+				log.Infof("Received update signal from server for new version %d", probeMsg.Version)
+				config.updateTargets()
+			}
 			log.Debugf("read channel msg: %s", string(readMsg))
 		case <-ticker.C:
-			log.Infof("sending ping")
 			msg := ProbeWebsocketMessage{Message: "PING", Version: config.Version}
 			msgBytes, marshalErr := json.Marshal(&msg)
 			if marshalErr != nil {
@@ -129,26 +136,12 @@ func startWebsocketClient(server string, config *VoyagerConfig) error {
 			if err != nil {
 				return fmt.Errorf("websocket write err: %w", err)
 			}
-			//case <-interrupt:
-			//	log.Infof("websocket goroutine receieved interrupt signal")
-
-			//	// Cleanly close the connection by sending a close message and then
-			//	// waiting (with timeout) for the server to close the connection.
-			//	err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-			//	if err != nil {
-			//		log.Warnf("Error closing websocket channel: %s", err)
-			//		return nil
-			//	}
-
-			//	// TODO: we might need to cleanly shut down other things too so eventually remove
-			//	// the exit here
-			//	os.Exit(1)
 		}
 	}
 
 }
 
-func wsReceive(ws *websocket.Conn, doneChan chan int, readChan chan string) {
+func wsReceive(ws *websocket.Conn, doneChan chan int, readChan chan []byte) {
 	defer close(doneChan)
 
 	for {
@@ -158,6 +151,6 @@ func wsReceive(ws *websocket.Conn, doneChan chan int, readChan chan string) {
 			return
 		}
 		log.Debugf("websocket recv: %s", message)
-		readChan <- string(message)
+		readChan <- message
 	}
 }
