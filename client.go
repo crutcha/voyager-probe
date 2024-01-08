@@ -124,8 +124,10 @@ func emitProbeResults(probe Probe) {
 		log.Warn("Error creating probe result payload: ", jsonErr)
 	}
 
+	log.Debugf("[POST] %s", string(payload))
+
 	client := &http.Client{Timeout: time.Second * 10}
-	req, _ := http.NewRequest("POST", fmt.Sprintf("https://%s/api/v1/probe-results/", voyagerServer), bytes.NewBuffer(payload))
+	req, _ := http.NewRequest("POST", fmt.Sprintf("https://%s/api/v1/probes/probe-results/", voyagerServer), bytes.NewBuffer(payload))
 	req.Header.Add("Authorization", fmt.Sprintf("Token %s", proberToken))
 	req.Header.Add("Content-Type", "application/json")
 
@@ -139,7 +141,7 @@ func emitProbeResults(probe Probe) {
 	jsonBody := make(map[string]interface{})
 	respBody, _ := ioutil.ReadAll(resp.Body)
 	if resp.StatusCode != 201 {
-		log.Warn(fmt.Sprintf("POST of probe results failed: [HTTP%d] %s\n", resp.StatusCode, string(respBody)))
+		log.Warn(fmt.Sprintf("POST of probe results failed: [HTTP%d]\n", resp.StatusCode))
 	} else {
 		json.Unmarshal(respBody, &jsonBody)
 		log.Info(fmt.Sprintf("Published probe result: %+v", jsonBody["id"]))

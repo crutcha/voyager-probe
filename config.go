@@ -15,6 +15,10 @@ type VoyagerConfig struct {
 	targets         map[string]ProbeTarget
 	refreshInterval uint
 	Version         uint
+
+	// the ProbeTarget struct is meant to match the data model from server.
+	// we will track the done signaling channels per target separately.
+	doneChans map[string]chan int
 }
 
 func NewConfig() *VoyagerConfig {
@@ -35,20 +39,20 @@ func NewConfig() *VoyagerConfig {
 		token:           proberToken,
 		Server:          voyagerServer,
 		targets:         make(map[string]ProbeTarget),
+		doneChans:       make(map[string]chan int),
 		refreshInterval: REFRESH_INTERVAL,
 	}
 }
 
 func (c *VoyagerConfig) updateTargets() {
+	// close existing probe goroutines first
+	for currentDest, doneChan := range c.doneChans {
+		log.Info("Stopping prober goroutine for ", currentDest)
+		delete(c.targets, currentDest)
+		delete(c.doneChans, currentDest)
+		doneChan <- 1
+	}
 	log.Info("Updating targets from voyager server")
-	/*
-		targetDefinitions, targetErr := getProbeTargets()
-		if targetErr != nil {
-			log.Warn("Unable to update targets: ", targetErr)
-			return
-		}
-	*/
-
 	proberInfo, proberErr := getProbeInfo()
 	if proberErr != nil {
 		log.Warn("Unable to update targets: ", proberErr)
@@ -58,14 +62,13 @@ func (c *VoyagerConfig) updateTargets() {
 
 	// destination is guarenteed to be unique
 	c.lock.Lock()
-	newTargetHash := make(map[string]ProbeTarget)
 	for _, target := range proberInfo.Targets {
-		newTargetHash[target.Destination] = target
+		c.targets[target.Destination] = target
+		done := make(chan int)
+		c.doneChans[target.Destination] = done
 	}
-
-	c.targets = newTargetHash
 	c.lock.Unlock()
 
 	log.Infof("Updated local configuration to version %d", c.Version)
-	log.Infof(fmt.Sprintf("New targets: %+v", newTargetHash))
+	log.Infof(fmt.Sprintf("New targets: %+v", c.targets))
 }

@@ -6,6 +6,9 @@ import (
 	"os"
 	"time"
 
+	"net/http"
+	_ "net/http/pprof"
+
 	log "github.com/sirupsen/logrus"
 )
 
@@ -44,6 +47,10 @@ func main() {
 
 	if *debugLog == true {
 		log.SetLevel(log.DebugLevel)
+		// TODO: this flag isn't just for logging anymore so...update that
+		go func() {
+			log.Println(http.ListenAndServe("localhost:6060", nil))
+		}()
 	}
 
 	log.Info("Starting...")
@@ -65,53 +72,42 @@ func main() {
 		WARN[2023-12-29 19:47:15] Key exists already for probe! Overwriting :0:0.0.0.0:0
 	*/
 	//startICMPListener()
-	currentProbers := make(map[string]chan int)
 	for {
-		// Remove stale targets first
-		for currentDest, doneChan := range currentProbers {
-			if _, ok := config.targets[currentDest]; !ok {
-				log.Info("Stopping prober goroutine for ", currentDest)
-				delete(currentProbers, currentDest)
-				doneChan <- 1
-			}
-		}
-
 		// Spin up new threads for new probes
 		for destination, _ := range config.targets {
-			if _, ok := currentProbers[destination]; !ok {
-				log.Info("Starting prober goroutine for ", destination)
-				done := make(chan int, 1)
-				currentProbers[destination] = done
-				go func(destination string, done chan int) {
-					ticker := time.NewTicker(time.Duration(config.targets[destination].Interval) * time.Second)
-					currentTickTime := config.targets[destination].Interval
+			log.Info("Starting prober goroutine for ", destination)
+			// TODO: would there always be something at this key?
+			doneChan := config.doneChans[destination]
+			go func(destination string, done chan int) {
+				ticker := time.NewTicker(time.Duration(config.targets[destination].Interval) * time.Second)
+				currentTickTime := config.targets[destination].Interval
 
-					// initial probe. pass by value should be fine here
-					config.lock.Lock()
-					go probeHandler(config.targets[destination])
-					config.lock.Unlock()
-					for {
-						select {
-						case <-ticker.C:
-							config.lock.Lock()
-							go probeHandler(config.targets[destination])
-							if config.targets[destination].Interval != currentTickTime {
-								log.Info(fmt.Sprintf(
-									"Interval update received. Changing interval for %s from %d  to %d seconds\n", destination,
-									currentTickTime, config.targets[destination].Interval,
-								))
-								currentTickTime = config.targets[destination].Interval
-								ticker.Stop()
-								ticker = time.NewTicker(time.Duration(config.targets[destination].Interval) * time.Second)
-							}
-							config.lock.Unlock()
-						case <-done:
-							log.Debug("Received halt request on done channel. Stopping ", destination)
-							return
+				// initial probe. pass by value should be fine here
+				//config.lock.Lock()
+				go probeHandler(config.targets[destination])
+				//config.lock.Unlock()
+				for {
+					select {
+					case <-ticker.C:
+						//config.lock.Lock()
+						go probeHandler(config.targets[destination])
+						if config.targets[destination].Interval != currentTickTime {
+							log.Info(fmt.Sprintf(
+								"Interval update received. Changing interval for %s from %d  to %d seconds\n", destination,
+								currentTickTime, config.targets[destination].Interval,
+							))
+							currentTickTime = config.targets[destination].Interval
+							ticker.Stop()
+							ticker = time.NewTicker(time.Duration(config.targets[destination].Interval) * time.Second)
 						}
+						//config.lock.Unlock()
+					case <-done:
+						log.Infof("Received halt request on done channel. Stopping ", destination)
+						// TODO: this also needs to cancel probeHandler goroutine
+						return
 					}
-				}(destination, done)
-			}
+				}
+			}(destination, doneChan)
 		}
 		time.Sleep(REFRESH_INTERVAL * time.Minute)
 	}

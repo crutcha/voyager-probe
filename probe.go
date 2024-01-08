@@ -1,11 +1,12 @@
 package main
 
 import (
-	log "github.com/sirupsen/logrus"
-	"gopkg.in/guregu/null.v4"
 	"net"
 	"sync"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	"gopkg.in/guregu/null.v4"
 )
 
 var probeTypeMap = map[string]ProbeExecutorFactory{
@@ -81,6 +82,7 @@ func updateDNSName(hop *ProbeResponse, wg *sync.WaitGroup) {
 }
 
 func probeHandler(target ProbeTarget) {
+	log.Infof("launching probe towards %s", target.Destination)
 	probe := Probe{
 		Target:    target.Destination,
 		StartTime: time.Now(),
