@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -84,13 +85,15 @@ func main() {
 
 				// initial probe. pass by value should be fine here
 				//config.lock.Lock()
-				go probeHandler(config.targets[destination])
+				//go probeHandler(config.targets[destination])
 				//config.lock.Unlock()
+				ctx, probeCancel := context.WithCancel(context.Background())
+				go probeHandler(ctx, config.targets[destination])
 				for {
 					select {
 					case <-ticker.C:
 						//config.lock.Lock()
-						go probeHandler(config.targets[destination])
+						go probeHandler(ctx, config.targets[destination])
 						if config.targets[destination].Interval != currentTickTime {
 							log.Info(fmt.Sprintf(
 								"Interval update received. Changing interval for %s from %d  to %d seconds\n", destination,
@@ -103,12 +106,14 @@ func main() {
 						//config.lock.Unlock()
 					case <-done:
 						log.Infof("Received halt request on done channel. Stopping ", destination)
+						probeCancel()
 						// TODO: this also needs to cancel probeHandler goroutine
 						return
 					}
 				}
 			}(destination, doneChan)
 		}
-		time.Sleep(REFRESH_INTERVAL * time.Minute)
+		<-config.Refresh
+		log.Info("REFRESH signal received, restarting probe loop!")
 	}
 }

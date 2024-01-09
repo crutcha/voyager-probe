@@ -37,6 +37,11 @@ type ProbeTarget struct {
 	Port        uint16 `json:"port"`
 }
 
+func (pt *ProbeTarget) String() string {
+	asBytes, _ := json.Marshal(pt)
+	return string(asBytes)
+}
+
 func getProbeInfo() (Prober, error) {
 	client := &http.Client{Timeout: time.Second * 10}
 	req, _ := http.NewRequest("GET", fmt.Sprintf("https://%s/api/v1/probes/prober/", voyagerServer), nil)

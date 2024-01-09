@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -38,6 +40,11 @@ type ProbeResponse struct {
 type ProbeBatch struct {
 	sync.Mutex
 	hops []ProbeResponse
+}
+
+type ProbeResult struct {
+	Probe Probe
+	Error error
 }
 
 func (b *ProbeBatch) Add(response ProbeResponse) {
@@ -81,38 +88,60 @@ func updateDNSName(hop *ProbeResponse, wg *sync.WaitGroup) {
 	}
 }
 
-func probeHandler(target ProbeTarget) {
+func probeHandler(ctx context.Context, target ProbeTarget) {
 	log.Infof("launching probe towards %s", target.Destination)
-	probe := Probe{
-		Target:    target.Destination,
-		StartTime: time.Now(),
-		Hops:      make([]ProbeResponse, 0),
-	}
+	probeResultChan := make(chan ProbeResult)
 
-	// TODO: better factory-ish thing here
-	executorFactory, ok := probeTypeMap[target.Type]
-	if !ok {
-		log.WithFields(log.Fields{"target": target}).Warn("Unsupported target protocol")
+	go func(ctx context.Context, resultChan chan ProbeResult) {
+		var result ProbeResult
+		probe := Probe{
+			Target:    target.Destination,
+			StartTime: time.Now(),
+			Hops:      make([]ProbeResponse, 0),
+		}
+		// TODO: better factory-ish thing here
+		executorFactory, ok := probeTypeMap[target.Type]
+		if !ok {
+			log.WithFields(log.Fields{"target": target}).Warn("Unsupported target protocol")
+			result.Error = fmt.Errorf("Unsupported protocol")
+			resultChan <- result
+			return
+		}
+		executor := executorFactory(target)
+		// TODO: the lengthy part happens in here because this wont return until all hops are
+		// done. the context really should be going into Execute interface method so we can
+		// cancel that early, but given executor is likely to change as the scope of probe
+		// types change, going to just leave this as is for now. if the client receives an
+		// updated config while this probe is still active, emitProbeResults will not fire so
+		// the results never show up, but the goroutine would still be running to completion
+		// anyway so....
+		hops, hopsErr := executor.Execute(target.Destination, target.Port, target.ProbeCount)
+		if hopsErr != nil {
+			log.Warn("Error executing probe: ", hopsErr)
+			result.Error = fmt.Errorf("Error exusting probe: %s", hopsErr)
+			resultChan <- result
+			return
+		}
+		probe.Hops = hops
+		resultChan <- result
+	}(ctx, probeResultChan)
+
+	select {
+	case <-ctx.Done():
+		log.Infof("probe cancelled: %s", target)
 		return
-	}
-	executor := executorFactory(target)
-	hops, hopsErr := executor.Execute(target.Destination, target.Port, target.ProbeCount)
-	if hopsErr != nil {
-		log.Warn("Error executing UDP probe: ", hopsErr)
-		return
-	}
-	probe.Hops = hops
+	case result := <-probeResultChan:
+		var wg sync.WaitGroup
+		wg.Add(len(result.Probe.Hops))
 
-	var wg sync.WaitGroup
-	wg.Add(len(probe.Hops))
+		// range will make a copy of each element and pass by value, but we want the pointer
+		// so we will do this the old school way.
+		for i := 0; i < len(result.Probe.Hops); i++ {
+			go updateDNSName(&result.Probe.Hops[i], &wg)
+		}
+		wg.Wait()
 
-	// range will make a copy of each element and pass by value, but we want the pointer
-	// so we will do this the old school way.
-	for i := 0; i < len(probe.Hops); i++ {
-		go updateDNSName(&probe.Hops[i], &wg)
+		result.Probe.EndTime = time.Now()
+		go emitProbeResults(result.Probe)
 	}
-	wg.Wait()
-
-	probe.EndTime = time.Now()
-	go emitProbeResults(probe)
 }

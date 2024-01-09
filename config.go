@@ -14,6 +14,7 @@ type VoyagerConfig struct {
 	lock            sync.Mutex
 	targets         map[string]ProbeTarget
 	refreshInterval uint
+	Refresh         chan int
 	Version         uint
 
 	// the ProbeTarget struct is meant to match the data model from server.
@@ -41,6 +42,7 @@ func NewConfig() *VoyagerConfig {
 		targets:         make(map[string]ProbeTarget),
 		doneChans:       make(map[string]chan int),
 		refreshInterval: REFRESH_INTERVAL,
+		Refresh:         make(chan int, 1),
 	}
 }
 
@@ -71,4 +73,5 @@ func (c *VoyagerConfig) updateTargets() {
 
 	log.Infof("Updated local configuration to version %d", c.Version)
 	log.Infof(fmt.Sprintf("New targets: %+v", c.targets))
+	c.Refresh <- 1
 }
